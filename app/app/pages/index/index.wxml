@@ -1,0 +1,74 @@
+<view class="Container">
+  <view class="tittle_bubble {{ statusLevel === 'normal' ? 'tittle-normal' : 'tittle-alarm' }}">
+    <view class="text_bubble">
+      <text class="text1">正在监测中：</text>
+      <text class="text2">{{statusText}}</text>
+    </view>
+  </view>
+
+
+  <view class="bubble_group">
+    <view class="fu_bubble">
+      <image src="/image/imange.png" class="temp_im"/>
+      <view class="text1_bubble">
+        <text class="te_text">当前温度</text>
+        <text class="te_data">{{Temp}}℃</text>
+      </view>
+     </view>
+
+     <view class="fu_bubble1">
+      <image src="/image/湿度.png" class="humi_im"/>
+      <view class="text2_bubble">
+        <text class="hu_text">当前湿度</text>
+        <text class="hu_data">{{Hum}}%</text>
+      </view>
+     </view>
+
+     <view class="fu_bubble2">
+      <image src="/image/火焰.png" class="fire"/>
+      <view class="text3_bubble">
+        <text class="bu_text">火焰传感器</text>
+        <text class="bu_text status-text {{ fireOn ? 'fire-on' : '' }}">{{ fireOn ? '检测到火焰' : '无火焰' }}</text>
+      </view>
+     </view>
+     
+     <view class="fu_bubble3">
+      <image src="/image/报警器@3x.png" class="buzzer_im"/>
+      <view class="text3_bubble">
+        <text class="bu_text">火灾报警器：{{ isAlarmOn ? '开' : '关' }}</text>
+        <button class="bu_data" size="mini" bindtap="Onenet_StopAlarm">消音</button>
+      </view>
+     </view>
+
+     <view class="fu_bubble6 {{ isGasLeak ? 'gas-alarm-card' : '' }}">
+      <image src="/image/烟雾传感器.png" class="gas_da_im"/>
+      <view class="text6_bubble">
+        <text class="gd_text">燃气监测</text>
+        <text class="gd_data status-text {{ isGasLeak ? 'gas-alarm-text' : 'gas-on' }}">{{ isGasLeak ? '燃气泄漏' : '正常' }}</text>
+        <text class="gd_hint">{{ isGasLeak ? '⚠ 浓度过高，泄漏警报！' : '浓度正常' }}</text>
+      </view>
+     </view>
+
+     <view class="fu_bubble4">
+      <image src="/image/燃气开关.png" class="gas_sw_im"/>
+      <view class="text4_bubble">
+        <text class="gs_text">燃气开关(舵机)</text>
+        <text class="gs_data status-text {{ GasSwitch ? 'gas-on' : '' }}">{{ GasSwitch ? '阀门关 (180°)' : '阀门开 (0°)' }}</text>
+        <button class="bu_data" size="mini" bindtap="turnOffGasSwitch" disabled="{{ GasSwitch }}">{{ GasSwitch ? '已关闭' : '关闭' }}</button>
+      </view>
+     </view>
+
+     <view class="fu_bubble5">
+      <image src="/image/风扇.png" class="fan_im"/>
+      <view class="text5_bubble">
+        <text class="fn_text">风扇</text>
+        <text class="fn_data status-text {{ Fan ? 'fan-on' : '' }}">{{ Fan ? '运行中' : '已停止' }}</text>
+        <button class="bu_data" size="mini" bindtap="toggleFan">{{ Fan ? '关闭' : '开启' }}</button>
+      </view>
+     </view>
+ 
+  </view>
+
+</view>
+
+

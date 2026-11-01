@@ -1,0 +1,218 @@
+.tittle_bubble{
+  display: flex;
+  width: 600rpx;
+  height: 150rpx;
+  border-radius: 30rpx;
+  border: cadetblue solid 10rpx;
+  padding: 30rpx;
+  margin: 30rpx;
+  align-items: center;
+}
+.tittle-normal{
+  background-color: #00c853;
+}
+.tittle-alarm{
+  background-color: #ff1744;
+}
+.Container{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.text1{
+  font-size: 48rpx;
+  color: #ffffff;
+}
+.text2{
+  font-size: 48rpx;
+  color: #ffffff;
+  font-weight: bold;
+}
+.normal{
+  width: 60rpx;
+  height: 60rpx;
+  padding: 15rpx;
+}
+
+
+.bubble_group{
+  display: flex;
+  flex-wrap: wrap;
+}
+.fu_bubble{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 300rpx;
+  height: 300rpx;
+  background-color: #ffffff;
+  border-radius: 30rpx;
+  box-shadow: 0rpx 0rpx 30rpx rgba(0, 0,0,0.1);
+  margin: 30rpx;
+}
+.temp_im{
+  width: 120rpx;
+  height: 120rpx;
+  margin: 10rpx;
+}
+.text1_bubble{
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+}
+.te_text{
+  font-size: 40rpx;
+}
+.te_data{
+  font-size: 50rpx;
+}
+
+.fu_bubble1{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 300rpx;
+  height: 300rpx;
+  background-color: #ffffff;
+  border-radius: 30rpx;
+  box-shadow: 0rpx 0rpx 30rpx rgba(0, 0,0,0.1);
+  margin: 30rpx;
+}
+
+.humi_im{
+  width: 120rpx;
+  height: 120rpx;
+  margin: 10rpx;
+}
+.text2_bubble{
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+}
+.hu_text{
+  font-size: 40rpx;
+}
+.hu_data{
+  font-size: 50rpx;
+}
+
+.fu_bubble2{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 300rpx;
+  height: 300rpx;
+  background-color: #ffffff;
+  border-radius: 30rpx;
+  box-shadow: 0rpx 0rpx 30rpx rgba(0, 0,0,0.1);
+  margin: 30rpx;
+}
+
+.status-text {
+  font-weight: bold;
+}
+
+.fu_bubble3{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 300rpx;
+  height: 300rpx;
+  background-color: #ffffff;
+  border-radius: 30rpx;
+  box-shadow: 0rpx 0rpx 30rpx rgba(0, 0,0,0.1);
+  margin: 30rpx;
+}
+.fire{
+  width: 120rpx;
+  height: 120rpx;
+  margin: 10rpx;
+}
+.buzzer_im{
+  width: 120rpx;
+  height: 120rpx;
+  margin: 10rpx;
+}
+.text3_bubble{
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+}
+.bu_text{
+  font-size: 40rpx;
+}
+.bu_data{
+  border: black solid 10rpx;
+  font-size: 40rpx;
+  
+}
+
+/* ===== 新增卡片：燃气开关(舵机) / 风扇 / 燃气监测 ===== */
+.fu_bubble4,
+.fu_bubble5,
+.fu_bubble6{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 300rpx;
+  height: 340rpx;
+  background-color: #ffffff;
+  border-radius: 30rpx;
+  box-shadow: 0rpx 0rpx 30rpx rgba(0, 0,0,0.1);
+  margin: 30rpx;
+}
+
+.gas_sw_im,
+.fan_im,
+.gas_da_im{
+  width: 120rpx;
+  height: 120rpx;
+  margin: 10rpx;
+}
+
+.text4_bubble,
+.text5_bubble,
+.text6_bubble{
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  align-items: center;
+}
+
+.gs_text,
+.fn_text,
+.gd_text{
+  font-size: 32rpx;
+}
+
+.gs_data,
+.fn_data{
+  font-size: 32rpx;
+}
+
+.gd_data{
+  font-size: 48rpx;
+}
+
+.gd_hint{
+  font-size: 24rpx;
+  color: #999999;
+}
+
+/* 状态高亮 */
+.fire-on{
+  color: #ff0000;
+}
+.gas-on{
+  color: #009944;
+}
+.fan-on{
+  color: #1e90ff;
+}
+.gas-alarm-text{
+  color: #ff0000;
+}
+.gas-alarm-card{
+  background-color: #ffe4e1;
+  border: 4rpx solid #ff0000;
+}
