@@ -1,0 +1,744 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * File Name          : freertos.c
+  * Description        : Code for freertos applications
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2026 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+
+/* Includes ------------------------------------------------------------------*/
+#include "FreeRTOS.h"
+#include "task.h"
+#include "main.h"
+#include "queue.h"   /* 原生 FreeRTOS API（原 cmsis_os.h 会强制引入 cmsis_os2.h 的配置断言） */
+
+#include "staus.h"
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+#include "wifi.h"
+#include "mqtt.h"
+#include "usart.h"
+#include "DHT11.h"
+#include "adc.h"
+#include "buzzer.h"
+#include "fan.h"
+#include "tim.h"
+#include "oled.h"
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+QueueHandle_t xQueue_Logic = NULL;
+QueueHandle_t xQueue_Display = NULL;
+QueueHandle_t xQueue_Network = NULL;
+QueueHandle_t xCmdQueue = NULL;
+
+volatile SystemStatus_t g_sys_status = {0, 0, 0, 0};
+SensorData_t sendData = {0, 0, 0, 0};
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+/* USER CODE BEGIN Variables */
+
+/* USER CODE END Variables */
+/* Definitions for defaultTask */
+//osThreadId_t defaultTaskHandle;
+//const osThreadAttr_t defaultTask_attributes = {
+//  .name = "defaultTask",
+//  .stack_size = 128 * 4,
+//  .priority = (osPriority_t) osPriorityNormal,
+//};
+
+/* Private function prototypes -----------------------------------------------*/
+/* USER CODE BEGIN FunctionPrototypes */
+#define TASK_NETWORK_PRIO   2
+/* 【重要】本数组的元素个数必须与 xTaskCreateStatic() 第 3 个参数（栈深度，单位：字）
+ * 完全一致。两者不一致时，FreeRTOS 会按参数值初始化栈，从而越界写入数组之后的
+ * 静态变量（TCB、任务句柄、队列句柄），表现为启动异常或随机死机。 */
+#define TASK_NETWORK_STACK_SIZE   320
+static StackType_t Task_Network_Stack[TASK_NETWORK_STACK_SIZE]; // 栈数组
+static StaticTask_t Task_Network_TCB;       // 任务控制块
+TaskHandle_t Task_Network_Handler;
+StaticTask_t	Task_Network_TCB;
+void Task_Network(void *pvParameters);
+
+#define TASK_SENSOR_SIZE   256
+#define TASK_SENSOR_PRIO   2
+TaskHandle_t Task_Sensor_Handler;
+void Task_Sensor(void *pvParameters);
+
+#define TASK_LOGIC_SIZE   128
+#define TASK_LOGIC_PRIO   3
+TaskHandle_t Task_Logic_Handler;
+void Task_Logic(void *pvParameters);
+
+#define TASK_KEY_SIZE   128
+#define TASK_KEY_PRIO   1
+TaskHandle_t Task_Key_Handler;
+void Task_Key(void *pvParameters);
+
+#define TASK_CONTROL_SIZE   256
+#define TASK_CONTROL_PRIO   2
+TaskHandle_t Task_Control_Handler;
+void Task_Control(void *pvParameters);
+
+#define TASK_DISPLAY_SIZE   128
+#define TASK_DISPLAY_PRIO   1
+TaskHandle_t Task_Display_Handler;
+void Task_Display(void *pvParameters);
+
+
+static char mqtt_json_buf[256];
+/* USER CODE END FunctionPrototypes */
+
+//void StartDefaultTask(void *argument);
+
+void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
+
+/**
+  * @brief  FreeRTOS initialization
+  * @param  None
+  * @retval None
+  */
+void MX_FREERTOS_Init(void) {
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+	xQueue_Logic = xQueueCreate(5, sizeof(SensorData_t)); // 这里编译器能识别了！
+	xQueue_Display = xQueueCreate(5, sizeof(SensorData_t));
+	xQueue_Network = xQueueCreate(5, sizeof(SensorData_t));
+	xCmdQueue = xQueueCreate(5, sizeof(ControlData_t));
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of defaultTask */
+//  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+	Task_Network_Handler = xTaskCreateStatic(
+													Task_Network,
+													"Task_Network",
+													TASK_NETWORK_STACK_SIZE,
+													NULL,
+													TASK_NETWORK_PRIO, 
+													Task_Network_Stack, 
+													&Task_Network_TCB);
+
+
+	xTaskCreate(	Task_Sensor,        		// 任务函数的函数名（指针）
+								"Task_Sensor",        	// 任务的名字（字符串，调试用）
+								TASK_SENSOR_SIZE, 			// 任务栈深度（注意单位：字，不是字节！）
+								NULL,        						// 传递给任务的参数（通常填 NULL）
+								TASK_SENSOR_PRIO,      // 任务优先级（数值越大优先级越高）
+								&Task_Sensor_Handler );// 任务句柄（如果不需要管理任务填 NULL）);
+								
+	xTaskCreate(	Task_Logic,        		// 任务函数的函数名（指针）
+								"Task_Logic",        	// 任务的名字（字符串，调试用）
+								TASK_LOGIC_SIZE, 			// 任务栈深度（注意单位：字，不是字节！）
+								NULL,        						// 传递给任务的参数（通常填 NULL）
+								TASK_LOGIC_PRIO,      // 任务优先级（数值越大优先级越高）
+								&Task_Logic_Handler );// 任务句柄（如果不需要管理任务填 NULL）);	
+
+	xTaskCreate(	Task_Key,        		// 任务函数的函数名（指针）
+								"Task_Key",        	// 任务的名字（字符串，调试用）
+								TASK_KEY_SIZE, 			// 任务栈深度（注意单位：字，不是字节！）
+								NULL,        						// 传递给任务的参数（通常填 NULL）
+								TASK_KEY_PRIO,      // 任务优先级（数值越大优先级越高）
+								&Task_Key_Handler );// 任务句柄（如果不需要管理任务填 NULL）);
+	xTaskCreate(	Task_Control,        		// 任务函数的函数名（指针）
+								"Task_Control",        	// 任务的名字（字符串，调试用）
+								TASK_CONTROL_SIZE, 			// 任务栈深度（注意单位：字，不是字节！）
+								NULL,        						// 传递给任务的参数（通常填 NULL）
+								TASK_CONTROL_PRIO,      // 任务优先级（数值越大优先级越高）
+								&Task_Control_Handler );// 任务句柄（如果不需要管理任务填 NULL）);
+
+	xTaskCreate(	Task_Display,        		// 任务函数的函数名（指针）
+								"Task_Display",        	// 任务的名字（字符串，调试用）
+								TASK_DISPLAY_SIZE, 			// 任务栈深度（注意单位：字，不是字节！）
+								NULL,        						// 传递给任务的参数（通常填 NULL）
+								TASK_DISPLAY_PRIO,      // 任务优先级（数值越大优先级越高）
+								&Task_Display_Handler );// 任务句柄（如果不需要管理任务填 NULL）);
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
+}
+
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
+//void StartDefaultTask(void *argument)
+//{
+//  /* USER CODE BEGIN StartDefaultTask */
+//  /* Infinite loop */
+//  for(;;)
+//  {
+//    osDelay(1);
+//  }
+//  /* USER CODE END StartDefaultTask */
+//}
+
+/* Private application code --------------------------------------------------*/
+/* USER CODE BEGIN Application */
+
+/*----------------------------------------------------------------------------------
+ * 空闲任务的静态内存回调
+ * 本工程 configSUPPORT_STATIC_ALLOCATION = 1，FreeRTOS 会调用本回调索取空闲任务的
+ * TCB 与栈。原先该函数由 cmsis_os2.c 以 __WEAK 形式提供；cmsis_os2.c 已从工程中
+ * 移除（它强制 configMAX_PRIORITIES=56、configUSE_TIMERS=1，占用约 1.7KB RAM），
+ * 因此必须在此补上强定义，否则链接会报 undefined symbol。
+ *--------------------------------------------------------------------------------*/
+/*----------------------------------------------------------------------------------
+ * 栈溢出钩子
+ * configCHECK_FOR_STACK_OVERFLOW 未在 FreeRTOSConfig.h 中定义，
+ * FreeRTOS.h 默认取 2，因此本回调必须由应用提供
+ * （原先由 cmsis_os2.c 以 __WEAK 形式提供，该文件已移出工程）。
+ * 触发时先记录任务名与剩余栈量，再停机，便于在调试器中定位。
+ *--------------------------------------------------------------------------------*/
+volatile char              *g_overflow_task_name = 0;   /* 溢出任务名，调试时 Watch 查看 */
+volatile configSTACK_DEPTH_TYPE g_overflow_stack_left = 0; /* 剩余栈量（字），0 = 刚好用尽 */
+
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+    g_overflow_task_name  = pcTaskName;                          /* 哪个任务溢出了 */
+    g_overflow_stack_left = uxTaskGetStackHighWaterMark(xTask);  /* 还差多少 */
+    Error_Handler();                                             /* 停机，便于定位 */
+}
+
+void vApplicationGetIdleTaskMemory(StaticTask_t **ppxIdleTaskTCBBuffer,
+                                   StackType_t  **ppxIdleTaskStackBuffer,
+                                   uint32_t      *pulIdleTaskStackSize)
+{
+    static StaticTask_t xIdleTaskTCB;
+    static StackType_t  ucIdleTaskStack[configMINIMAL_STACK_SIZE];
+
+    *ppxIdleTaskTCBBuffer   = &xIdleTaskTCB;
+    *ppxIdleTaskStackBuffer = &ucIdleTaskStack[0];
+    *pulIdleTaskStackSize   = configMINIMAL_STACK_SIZE;
+}
+void Task_Network(void *pvParameters)
+{
+		Task_Network_Handler = xTaskGetCurrentTaskHandle();
+		ControlData_t cmd_data;
+		static SensorData_t sensor_data={0};
+		uint8_t ping_retry_count = 0;
+		uint32_t last_tx_time= xTaskGetTickCount();
+		uint32_t last_ping_time = xTaskGetTickCount();
+		while(1)
+		{
+			WIFI_Server_Connect();
+			
+
+			while(g_sys_status.Connect_flag ==1){
+				if(MQTT_TxDataOutPtr != MQTT_TxDataInPtr)
+				{	
+					if(MQTT_TxDataOutPtr[2]==0x10||(MQTT_TxDataOutPtr[2]==0x82)&&(g_mqtt_state.connect_pack_flag==1)||(g_mqtt_state.subscribe_pack_flag==1)){
+						u2_TxData(MQTT_TxDataOutPtr);
+					MQTT_TxDataOutPtr+=TBUFF_UNIT;
+					if(MQTT_TxDataOutPtr==MQTT_TxDataEndPtr)
+						MQTT_TxDataOutPtr = MQTT_TxDataBuf[0];
+			}
+		}
+		
+			if (MQTT_RxDataOutPtr != MQTT_RxDataInPtr)  //if?????????????????????????????
+			{
+    //---------------------------
+    //          处理CONNACK报文
+    //---------------------------
+    //if判断，如果第一个字节是0x20，表示收到的是CONNACK报文
+    //接着我们要判断第4个字节，看看CONNECT报文是否成功
+			if (MQTT_RxDataOutPtr[2] == 0x20)
+			{
+					switch (MQTT_RxDataOutPtr[5])
+					{
+							case 0x00 :     
+									g_mqtt_state.connect_pack_flag = 1;               //CONNECT????????????
+									break;                              //???????case 0x00
+
+							case 0x01 :
+									g_sys_status.Connect_flag = 0;
+									break;
+
+							case 0x02 :
+									g_sys_status.Connect_flag = 0;
+									break;
+
+							case 0x03 :
+									g_sys_status.Connect_flag = 0;
+									break;
+
+							case 0x04 :
+									g_sys_status.Connect_flag = 0;
+									break;
+
+							case 0x05 :
+									g_sys_status.Connect_flag = 0;
+									break;
+
+							default :
+									g_sys_status.Connect_flag = 0;
+									break;
+        }
+    }
+		//if判断，第一个字节是0x90，表示收到的是SUBACK报文
+//接着我们要判断订阅回复，看看是不是成功
+		else if(MQTT_RxDataOutPtr[2]==0x90){
+			switch(MQTT_RxDataOutPtr[6]){
+					case 0x00 :	
+					case 0x01 :
+                    g_mqtt_state.subscribe_pack_flag = 1;           //SubcribePack_flag??1??????????????
+                    g_mqtt_state.ping_flag = 0;                   //Ping_flag????
+                    break;                           //???????
+					default   : 
+                    g_sys_status.Connect_flag = 0;                //Connect_flag????????????
+                    break;                           //???????
+						}
+				}
+			else if(MQTT_RxDataOutPtr[2]==0xD0){
+				ping_retry_count = 0; 
+				last_ping_time = xTaskGetTickCount();
+				if(g_mqtt_state.ping_flag==1){                //???Ping_flag=1?????????η???
+						g_mqtt_state.ping_flag = 0;               //????Ping_flag???
+				}else if(g_mqtt_state.ping_flag>1){           //???Ping_flag>1????????η????????????2s???????????
+						g_mqtt_state.ping_flag = 0;               //????Ping_flag???
+				}
+}
+
+//if判断，如果第一个字节是0x30，表示收到的是服务器发来的推送数据
+//我们要提取控制命令
+		else if((MQTT_RxDataOutPtr[2]==0x30)){
+				MQTT_DealPushdata_Qos(MQTT_RxDataOutPtr);        //??????0????????
+			
+		}
+
+		MQTT_RxDataOutPtr +=RBUFF_UNIT;                     //???????
+		if(MQTT_RxDataOutPtr==MQTT_RxDataEndPtr)            //????????????β????
+				MQTT_RxDataOutPtr = MQTT_RxDataBuf[0];          //????λ???????????
+//处理接收缓冲区数据的else if分支结尾
+
+/*-------------------------------------------*/
+/*              处理命令缓冲区数据            */
+/*-------------------------------------------*/
+		if(MQTT_CMDOutPtr != MQTT_CMDInPtr){   
+			memset(&cmd_data, 0, sizeof(ControlData_t));
+				if(strstr((char *)MQTT_CMDOutPtr+2,"\"params\":{\"buzzer\":true}")){
+						cmd_data.fan_cmd   = g_sys_status.fan_state;
+						cmd_data.valve_cmd = g_sys_status.valve_state;
+						cmd_data.buzzer_cmd = 1;
+						xQueueSend(xCmdQueue,&cmd_data,0);
+				}else if(strstr((char *)MQTT_CMDOutPtr+2,"\"params\":{\"buzzer\":false}")){
+						cmd_data.fan_cmd   = g_sys_status.fan_state;
+						cmd_data.valve_cmd = g_sys_status.valve_state;
+						cmd_data.buzzer_cmd = 0;
+						xQueueSend(xCmdQueue,&cmd_data,0);
+				}else if(strstr((char *)MQTT_CMDOutPtr+2,"\"params\":{\"fan\":true}")){
+						cmd_data.buzzer_cmd   = g_sys_status.buzzer_state;
+						cmd_data.valve_cmd = g_sys_status.valve_state;
+						cmd_data.fan_cmd =1;
+						xQueueSend(xCmdQueue,&cmd_data,0);
+				}else if(strstr((char *)MQTT_CMDOutPtr+2,"\"params\":{\"fan\":false}")){
+						cmd_data.buzzer_cmd   = g_sys_status.buzzer_state;
+						cmd_data.valve_cmd = g_sys_status.valve_state;
+						cmd_data.fan_cmd =0;
+						xQueueSend(xCmdQueue,&cmd_data,0);
+				}else if(strstr((char *)MQTT_CMDOutPtr+2,"\"params\":{\"gas_sw\":true}")){
+						cmd_data.buzzer_cmd   = g_sys_status.buzzer_state;
+						cmd_data.fan_cmd = g_sys_status.fan_state;
+						cmd_data.valve_cmd = 1;
+						xQueueSend(xCmdQueue,&cmd_data,0);
+				}else if(strstr((char *)MQTT_CMDOutPtr+2,"\"params\":{\"gas_sw\":false}")){
+						cmd_data.buzzer_cmd   = g_sys_status.buzzer_state;
+						cmd_data.fan_cmd = g_sys_status.fan_state;
+						cmd_data.valve_cmd = 0;
+						xQueueSend(xCmdQueue,&cmd_data,0);
+				}
+				else if(strstr((char *)MQTT_CMDOutPtr+2,"\"params\":{\"gas_sw\":true}")){
+						cmd_data.buzzer_cmd   = g_sys_status.buzzer_state;
+						cmd_data.fan_cmd = g_sys_status.fan_state;
+						cmd_data.valve_cmd = 1;
+						xQueueSend(xCmdQueue,&cmd_data,0);
+				}else if(strstr((char *)MQTT_CMDOutPtr+2,"\"params\":{\"gas_sw\":false}")){
+						cmd_data.buzzer_cmd   = g_sys_status.buzzer_state;
+						cmd_data.fan_cmd = g_sys_status.fan_state;
+						cmd_data.valve_cmd = 0;
+						xQueueSend(xCmdQueue,&cmd_data,0);
+				}
+
+				MQTT_CMDOutPtr += CBUFF_UNIT;                   //???????
+				if(MQTT_CMDOutPtr==MQTT_CMDEndPtr)              //????????????β????
+						MQTT_CMDOutPtr = MQTT_CMDBuf[0];            //????λ???????????
+		}
+			}
+				if(ping_retry_count==0 && xTaskGetTickCount()-last_ping_time >pdMS_TO_TICKS(30000))
+				{
+					MQTT_PingREQ();
+					ping_retry_count=1;
+					last_ping_time=xTaskGetTickCount();
+				}
+				else if(ping_retry_count>0 && ping_retry_count<5 && xTaskGetTickCount()-last_ping_time >pdMS_TO_TICKS(2000)){
+					MQTT_PingREQ();
+					ping_retry_count++;
+					last_ping_time=xTaskGetTickCount();
+				}
+				else if(ping_retry_count>=5 && xTaskGetTickCount()-last_ping_time >pdMS_TO_TICKS(2000)){
+					g_sys_status.Connect_flag = 0; 
+					// 清理 MQTT 内部的所有标志位，防止重连后状态错乱
+					g_mqtt_state.ping_flag = 0;
+					g_mqtt_state.connect_pack_flag = 0;
+					g_mqtt_state.subscribe_pack_flag = 0;
+					break; // 跳出内层循环，回到最外层去重连
+				}
+				vTaskDelay(pdMS_TO_TICKS(10));
+//				printf("当前任务栈剩余: %d 字\r\n", uxTaskGetStackHighWaterMark(NULL));
+				xQueueReceive(xQueue_Network ,&sensor_data ,pdMS_TO_TICKS(200));
+				if(g_mqtt_state.connect_pack_flag==1 && g_mqtt_state.subscribe_pack_flag==1 && xTaskGetTickCount() - last_tx_time > pdMS_TO_TICKS(1000))
+				{
+					last_tx_time = xTaskGetTickCount();
+					sprintf(mqtt_json_buf,
+        "{\"id\":\"123\",\"version\":\"1.0\",\"params\":{"
+				"\"humi\":{\"value\":%d},"
+        "\"temp\":{\"value\":%d},"
+        "\"buzzer\":{\"value\":%s},"
+        "\"fire\":{\"value\":%s},"
+        "\"fan\":{\"value\":%s},"
+        "\"gas_da\":{\"value\":%s},"
+        "\"gas_sw\":{\"value\":%s}"
+        "}}",
+				sensor_data.humi,sensor_data.temp,
+        (g_sys_status.buzzer_state == 0) ? "false" : "true",
+        (sensor_data.fire_val  >  2500) ? "true" : "false",
+        (g_sys_status.fan_state   != 0) ? "true" : "false",
+        (sensor_data.mq_val    >  3000) ? "true" : "false",
+        (g_sys_status.valve_state != 0) ? "true" : "false");
+        MQTT_Publish(P_TOPIC_NAME, mqtt_json_buf, strlen(mqtt_json_buf));
+				}
+			}
+			
+		}
+	
+}
+
+
+void Task_Sensor(void *pvParameters)
+{
+		uint8_t temp=0, humi=0;
+		SensorData_t sendData;
+		TickType_t last_dht11_tick = xTaskGetTickCount();
+		TickType_t last_logic_send_tick = 0;                   // 控制 逻辑任务 高频发送
+    TickType_t last_net_display_send_tick = 0;             // 控制 网络/显示 低频发送
+		HAL_TIM_OC_Start(&htim1, TIM_CHANNEL_1);
+		HAL_ADC_Start_DMA(&hadc1, (uint32_t*)g_adc_buf, 2);
+		uint8_t ret;
+		while(1)
+		{
+			 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000)); 
+			 TickType_t current_tick = xTaskGetTickCount();
+        sendData.mq_val = g_mq2_filtered;
+        sendData.fire_val = g_fire_filtered;
+				sendData.temp = 0; // 默认值，防止脏数据
+				sendData.humi = 0;
+			
+			if(current_tick - last_logic_send_tick >= pdMS_TO_TICKS(200))
+			{
+					last_logic_send_tick = current_tick;
+					xQueueSend(xQueue_Logic, &sendData, 0);
+				}
+		
+			if (current_tick - last_net_display_send_tick >= pdMS_TO_TICKS(3000)) 
+        {
+            last_net_display_send_tick = current_tick;
+            
+            // 4.1 每 3 秒读一次 DHT11（保护时序）
+            if (current_tick - last_dht11_tick >= pdMS_TO_TICKS(3000)) 
+							{
+									last_dht11_tick = current_tick;
+									ret = DHT11_Read_Data(&temp, &humi);
+				
+			  if (ret == 0) 
+				{
+          sendData.temp = temp;
+          sendData.humi = humi;
+         }
+			}
+				xQueueSend(xQueue_Display,&sendData,0);
+				xQueueSend(xQueue_Network,&sendData,0);
+		}
+				
+		}
+}
+
+void Task_Logic(void *pvParameters)
+{
+		SensorData_t re_sensor_data ={0};
+		ControlData_t cmd_data={0};
+		static uint8_t fire_alarm_reported=0;
+		static uint8_t gas_alarm_reported=0;
+		static uint8_t normal_reported = 0;
+		while(1)
+		{
+			 cmd_data.buzzer_cmd   = g_sys_status.buzzer_state;
+			 cmd_data.fan_cmd      = g_sys_status.fan_state;
+			 cmd_data.valve_cmd    = g_sys_status.valve_state;
+			
+			if(xQueueReceive(xQueue_Logic,&re_sensor_data,portMAX_DELAY)== pdTRUE)
+			{
+					if (re_sensor_data.fire_val > 2500 && re_sensor_data.mq_val > 3000)
+				{
+					if (fire_alarm_reported == 0 && gas_alarm_reported ==0)
+					{
+            fire_alarm_reported = 1;
+						gas_alarm_reported = 1;
+						normal_reported = 0;
+            
+						cmd_data.buzzer_cmd = 1;
+						cmd_data.fan_cmd    = 1;
+						cmd_data.valve_cmd  = 1;
+						xQueueSend(xCmdQueue,&cmd_data,0);
+        }
+    }
+
+    /* ===== 情况2：只有燃气报警 ===== */
+    else if (re_sensor_data.mq_val > 3000)
+    {
+        if (gas_alarm_reported == 0)
+        {
+            gas_alarm_reported = 1;
+						normal_reported = 0;
+					cmd_data.valve_cmd = g_sys_status.valve_state;
+					cmd_data.buzzer_cmd = 1;
+					cmd_data.fan_cmd    = 1;
+					xQueueSend(xCmdQueue,&cmd_data,0);
+        }
+    }
+
+    /* ===== 情况3：只有火焰报警 ===== */
+    else if (re_sensor_data.fire_val > 2500)
+    {
+        if (fire_alarm_reported==0)
+        {
+            fire_alarm_reported = 1;
+						normal_reported = 0;
+//            sero_value(180);
+//            BUZZER_ON();
+						cmd_data.buzzer_cmd = 1;
+						cmd_data.fan_cmd    = 1;
+						cmd_data.valve_cmd  = 1;
+						xQueueSend(xCmdQueue,&cmd_data,0);
+            
+        }
+    }
+
+    /* ===== 情况4：都正常，恢复 ===== */
+    else
+    {
+        if (normal_reported == 0)
+        {
+            normal_reported = 1;
+            fire_alarm_reported = 0;
+            gas_alarm_reported = 0;
+
+            cmd_data.buzzer_cmd = 0;
+						cmd_data.fan_cmd    = 0;
+						cmd_data.valve_cmd  = 0;
+						xQueueSend(xCmdQueue,&cmd_data,0);
+        }
+    }
+
+			}
+		}
+}
+
+void Task_Key(void *pvParameters)
+{
+		ControlData_t cmd_data;
+	
+		while(1)
+		{
+				if(ulTaskNotifyTake(pdTRUE, portMAX_DELAY) > 0)
+				{
+					/* 按下确认：延时 20ms 软件去抖 */
+					vTaskDelay(pdMS_TO_TICKS(20));
+
+					if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET)
+					{
+						/* 等释放：避免按住不放时动作连发（最多等 500ms） */
+						for(uint16_t i = 0; i < 50 &&
+						    HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET; i++)
+							vTaskDelay(pdMS_TO_TICKS(10));
+
+						cmd_data.fan_cmd    = g_sys_status.fan_state;
+						cmd_data.valve_cmd  = g_sys_status.valve_state;
+						cmd_data.buzzer_cmd = 0;          /* 消音 */
+						xQueueSend(xCmdQueue, &cmd_data, 0);
+					}
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) == GPIO_PIN_RESET)
+					{
+						for(uint16_t i = 0; i < 50 &&
+						    HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) == GPIO_PIN_RESET; i++)
+							vTaskDelay(pdMS_TO_TICKS(10));
+
+						cmd_data.buzzer_cmd = g_sys_status.buzzer_state;  /* 原代码漏了这句 */
+						cmd_data.valve_cmd  = g_sys_status.valve_state;
+						cmd_data.fan_cmd    = 0;          /* 手动关风扇 */
+						xQueueSend(xCmdQueue, &cmd_data, 0);
+					}
+					else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_10) == GPIO_PIN_RESET)
+					{
+						for(uint16_t i = 0; i < 50 &&
+						    HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_10) == GPIO_PIN_RESET; i++)
+							vTaskDelay(pdMS_TO_TICKS(10));
+
+						cmd_data.buzzer_cmd = g_sys_status.buzzer_state;
+						cmd_data.valve_cmd  = g_sys_status.valve_state;
+						cmd_data.fan_cmd    = 1;          /* 手动开风扇 */
+						xQueueSend(xCmdQueue, &cmd_data, 0);
+					}
+				}
+		}
+}
+
+void Task_Control(void *pvParameters)
+{		
+		ControlData_t cmd_data;
+		
+		while(1)
+		{
+				if(xQueueReceive(xCmdQueue,&cmd_data,pdMS_TO_TICKS(1000)) > 0)
+				{
+						if(cmd_data.buzzer_cmd == 0)
+						{
+							BUZZER_OFF();
+							g_sys_status.buzzer_state = 0;
+						}
+						else
+						{
+							BUZZER_ON();
+							g_sys_status.buzzer_state = 1;
+						}
+						if(cmd_data.fan_cmd    == 0)
+						{
+							FAN_OFF();
+							g_sys_status.fan_state    = 0;
+						}
+						else 
+						{
+							FAN_ON();
+							g_sys_status.fan_state    = 1;
+						}
+						if(cmd_data.valve_cmd  == 0)
+						{
+							sero_value(180);
+							g_sys_status.valve_state=0;
+						}
+						else
+						{
+							sero_value(0);
+							g_sys_status.valve_state=1;
+						}
+						
+				}
+				 
+		}
+}
+
+
+void Task_Display(void *pvParameters)
+{
+		static SensorData_t sensor_data={0,0,0,0};
+		uint32_t now_time;
+		static uint32_t oled_last_tick = 0;
+		while(1)
+		{
+				if(xQueueReceive(xQueue_Display,&sensor_data,pdMS_TO_TICKS(100)) == pdTRUE)
+				{
+					
+				}
+				
+				now_time = HAL_GetTick();
+				if(now_time - oled_last_tick >= 1000)
+				{
+				OLED_ShowString6x8(0, 0, "WIFI:");
+				OLED_ShowString6x8(30, 0, (g_sys_status.Connect_flag >= 1) ? "YES" : "NO ");
+				OLED_ShowString6x8(60, 0, "CLOUD:");
+				OLED_ShowString6x8(96, 0, (g_mqtt_state.subscribe_pack_flag == 1) ? "YES" : "NO ");
+
+    // 第2行：温湿度（合并）
+				OLED_ShowString6x8(0, 1, "TEMP:");
+				OLED_ShowChar6x8(30, 1, sensor_data.temp / 10 + '0'); // 十位：25/10=2, 2+'0'='2'
+				OLED_ShowChar6x8(36, 1, sensor_data.temp % 10 + '0'); // 个位：25%10=5, 5+'0'='5'
+				OLED_ShowString6x8(48, 1, "C ");
+				OLED_ShowString6x8(60, 1, "HUMI:");
+				OLED_ShowChar6x8(90, 1, sensor_data.humi / 10 + '0'); // 十位
+				OLED_ShowChar6x8(96, 1, sensor_data.humi % 10 + '0'); // 个位
+				OLED_ShowString6x8(108, 1, "% ");
+
+    // 第3行：火焰
+				OLED_ShowString6x8(0, 2, "FIRE:");
+				OLED_ShowString6x8(30, 2, (sensor_data.fire_val < 2500) ? "OK " : "NG ");
+
+    // 第4行：报警
+				OLED_ShowString6x8(0, 3, "ALARM:");
+				OLED_ShowString6x8(36, 3, (g_sys_status.buzzer_state!= 0) ? "ON " : "OFF");
+
+    // 第5行：燃气阀门
+				OLED_ShowString6x8(0, 4, "GAS VALVE:");
+				OLED_ShowString6x8(60, 4, (g_sys_status.valve_state != 0) ? "ON " : "OFF");
+
+    // 第6行：燃气浓度
+				OLED_ShowString6x8(0, 5, "CONC:");
+				OLED_ShowString6x8(30, 5, (sensor_data.mq_val < 3000) ? "OK " : "NG ");
+
+    // 第7行：风扇
+				OLED_ShowString6x8(0, 6, "FAN:");
+				OLED_ShowString6x8(24, 6, (g_sys_status.fan_state  != 0) ? "ON " : "OFF");
+				
+				}
+
+			vTaskDelay(pdMS_TO_TICKS(10));
+		}
+}
+/* USER CODE END Application */

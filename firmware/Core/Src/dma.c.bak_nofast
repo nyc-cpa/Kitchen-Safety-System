@@ -1,0 +1,143 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file    dma.c
+  * @brief   This file provides code for the configuration
+  *          of all the requested memory to memory DMA transfers.
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2026 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+
+/* Includes ------------------------------------------------------------------*/
+#include "dma.h"
+
+/* USER CODE BEGIN 0 */
+//#include "fire.h"
+//#include "mq2.h"
+#include "adc.h"
+#include "main.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "queue.h"   /* 原生 FreeRTOS API（原 cmsis_os.h 会强制引入 cmsis_os2.h 的配置断言） */
+#include "stdio.h"
+#include "string.h"
+#include "wifi.h"
+#include "tim.h"
+#include "mqtt.h"
+#include "staus.h"
+
+/* 响应时间调试变量（定义在 freertos.c） */
+
+extern volatile uint8_t  g_fire_fast;
+
+
+
+#include "staus.h"
+/* USER CODE END 0 */
+
+/*----------------------------------------------------------------------------*/
+/* Configure DMA                                                              */
+/*----------------------------------------------------------------------------*/
+
+/* USER CODE BEGIN 1 */
+DMA_HandleTypeDef hdma_adc1;
+/* USER CODE END 1 */
+
+/**
+  * Enable DMA controller clock
+  */
+void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel6_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel6_IRQn);
+
+}
+
+/* USER CODE BEGIN 2 */
+void MX1_DMA_Init(void)
+{
+    /* DMA1 通道1 是 ADC1 的专用通道（STM32F1 固定映射，不能改） */
+    hdma_adc1.Instance = DMA1_Channel1;
+    hdma_adc1.Init.Direction = DMA_PERIPH_TO_MEMORY;     /* 外设→内存 */
+    hdma_adc1.Init.PeriphInc = DMA_PINC_DISABLE;          /* 外设地址固定（始终读DR寄存器） */
+    hdma_adc1.Init.MemInc = DMA_MINC_ENABLE;              /* 内存地址递增（buf[0]→buf[1]） */
+    hdma_adc1.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;  /* 外设数据宽度16位 */
+    hdma_adc1.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;     /* 内存数据宽度16位 */
+    hdma_adc1.Init.Mode = DMA_CIRCULAR;                   /* 循环模式，转完自动从头开始 */
+    hdma_adc1.Init.Priority = DMA_PRIORITY_HIGH;
+    HAL_DMA_Init(&hdma_adc1);
+
+    /* 把 DMA 句柄关联到 ADC 句柄 */
+    __HAL_LINKDMA(&hadc1, DMA_Handle, hdma_adc1);
+}
+
+
+void DMA1_Channel1_IRQHandler(void)
+{
+    HAL_DMA_IRQHandler(&hdma_adc1);
+}
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+		static uint16_t div_cnt = 0;
+		static uint8_t  fire_fast_cnt = 0;
+	
+    if(hadc->Instance == ADC1)
+    {
+        /* 响应时间起点：原始 ADC 值首次越过阈值（100Hz 采样，含后续 10 次滤波与 200ms 队列） */
+        uint16_t fire_now = 4095 - g_adc_buf[0];
+        uint16_t mq_now   = g_adc_buf[1];
+        /* 火焰快速通道：连续 5 次原始值 >2500 直接置火警，不等 10 点滤波 */
+        if (fire_now > 2500)
+        {
+            if (fire_fast_cnt < 5) fire_fast_cnt++;
+            if (fire_fast_cnt >= 5) g_fire_fast = 1;
+        }
+        else if (fire_now < 2300)
+        {
+            fire_fast_cnt = 0;
+            g_fire_fast = 0;
+        }
+				div_cnt++;
+				if (div_cnt >= 10)
+        {
+            div_cnt = 0;
+
+            /* 读取原始值 */
+            uint16_t fire_raw = 4095 - g_adc_buf[0];   // 火焰反向输出
+            uint16_t mq2_raw  = g_adc_buf[1];          // MQ-2烟雾
+
+            /* ========== 加滤波 ========== */
+            g_fire_filtered = Filter_Push(&fire_filter, fire_raw);
+            g_mq2_filtered  = Filter_Push(&mq2_filter, mq2_raw);
+			
+						/* 阈值判断，直接比较原始ADC值（0~4095） */
+						/* ch0 = 火焰(PA1): 高于 2500 判火焰 */
+					
+				}
+				 BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+				if (Task_Sensor_Handler != NULL) {
+         vTaskNotifyGiveFromISR(Task_Sensor_Handler, &xHigherPriorityTaskWoken);
+         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+				}
+    }
+}
+
+/* USER CODE END 2 */
+
