@@ -75,7 +75,7 @@ LICENSE
 
 1. 用 STM32CubeMX 打开 `firmware/*.ioc`
 2. Keil MDK 打开 `firmware/MDK-ARM/*.uvprojx`
-3. 复制 `firmware/Core/Inc/config.example.h` 为 `config.h`，填入自己的 WiFi 与 OneNET 参数
+3. 修改 MyCode 目录下的 wifi.h 和 mqtt.h，填入自己的 WiFi 与 OneNET 参数（已脱敏）
 4. 编译、烧录
 5. 串口 USART1（PA9/PA10，115200）可看调试信息
 
